@@ -45,7 +45,7 @@ class Connection
 
 		// Let's give the protocol a reference to the socket so it can write its replies
 		$this->protocol = new Connection\Protocol($this->socket);
-		$this->protocol->on(Frame\Method\Connection\CloseOk::class, function (): void {
+		$this->protocol->on('close', function (): void {
 			$this->socket->close();
 			$this->parser->cancel();
 		});
@@ -135,7 +135,7 @@ class Connection
 			$frameHeader = yield Frame::HEADER_SIZE;
 			extract(unpack('Ctype/nchannel/Nsize', $frameHeader));
 
-			$payload = yield $size;
+			$payload = $size > 0 ? yield $size : '';
 
 			$end = yield 1;
 			if (ord($end) !== Frame::END_MAGIC) {

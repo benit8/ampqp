@@ -26,13 +26,6 @@ class Queue
 	) {
 	}
 
-	public function __destruct()
-	{
-		// if (!$this->autoDelete) {
-		// 	$this->delete();
-		// }
-	}
-
 	public function bind(string|Exchange $exchange, string $routingKey = '', bool $noWait = false, array $arguments = []): void
 	{
 		if ($exchange instanceof Exchange) {

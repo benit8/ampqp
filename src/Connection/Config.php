@@ -15,7 +15,7 @@ final class Config
 		public readonly string $vhost = '/',
 		public readonly int    $maxChannels = 0xFFFF,
 		public readonly int    $maxFrameSize = 0xFFFF,
-		public readonly int    $heartbeatRate = 0,
+		public readonly int    $heartbeatTimeout = 60,
 		public readonly float  $channelTimeout = 0.0,
 	) {
 	}

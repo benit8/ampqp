@@ -17,6 +17,9 @@ use Benit8\Ampqp\Frame\Method\Queue;
 use Benit8\Ampqp\Frame\Method\Tx;
 use Benit8\Ampqp\Queue\Message;
 use Benit8\EventEmitter\EventEmitterTrait;
+use Revolt\EventLoop;
+
+use function Amp\async;
 
 /**
  * This class should interact with frames, implementing the AMQP methods and
@@ -37,8 +40,15 @@ final class Protocol
 
 	private ?object $properties = null;
 
+	/** @var null|string */
+	private ?string $heartbeatReader = null;
+	/** @var null|string */
+	private ?string $heartbeatWriter = null;
+
 	/**
 	 * Constructor.
+	 *
+	 * @param Socket $socket
 	 */
 	public function __construct(
 		private readonly Socket $socket,
@@ -57,6 +67,10 @@ final class Protocol
 		$this->socket->write(self::HEADER);
 
 		$this->on('frame', function ($frame): void {
+			if ($this->heartbeatReader !== null) {
+				EventLoop::enable(EventLoop::disable($this->heartbeatReader));
+			}
+
 			foreach ($this->awaiting as $i => [$id, $frameClasses, $deferred]) {
 				if ($frame->channelId === $id && in_array($frame::class, $frameClasses)) {
 					$deferred->complete($frame);
@@ -69,7 +83,7 @@ final class Protocol
 		});
 
 		$this->on(Basic\Deliver::class, function (Basic\Deliver $frame): void {
-			\Amp\async(function () use ($frame) {
+			async(function () use ($frame) {
 				$message = $this->awaitMessage($frame->channelId, $frame);
 				$this->emit('message.' . $frame->consumerTag, $message);
 			});
@@ -83,13 +97,25 @@ final class Protocol
 	}
 
 	/**
-	 * Requets to close the connection.
+	 * Requests to close the connection.
+	 *
+	 * @param int    $code
+	 * @param string $reason
 	 *
 	 * @return void
 	 */
 	public function close(int $code, string $reason): void
 	{
 		$this->send(new Connection\Close($code, $reason));
+
+		if ($this->heartbeatReader !== null) {
+			EventLoop::cancel($this->heartbeatReader);
+			$this->heartbeatReader = null;
+		}
+		if ($this->heartbeatWriter !== null) {
+			EventLoop::cancel($this->heartbeatWriter);
+			$this->heartbeatWriter = null;
+		}
 	}
 
 	/**
@@ -121,14 +147,24 @@ final class Protocol
 	 */
 	private function onConnectionTune(Connection\Tune $frame, Config $config, DeferredFuture $onOpen): void
 	{
-		$maxChannel = min($config->maxChannels,   $frame->channelMax);
-		$maxFrame   = min($config->maxFrameSize,  $frame->frameMax);
-		$heartbeat  = min($config->heartbeatRate, $frame->heartbeat);
+		$maxChannel = min($config->maxChannels,      $frame->channelMax);
+		$maxFrame   = min($config->maxFrameSize,     $frame->frameMax);
+		$heartbeat  = min($config->heartbeatTimeout, $frame->heartbeat);
 
 		$this->properties->maxChannels = $maxChannel;
 		$this->properties->maxFrameSize = $maxFrame;
 
-		// $this->setupHeartbeat($heartbeat);
+		if ($heartbeat > 0) {
+			// Close the connection if we don't hear from the server anymore
+			$this->heartbeatReader = EventLoop::repeat($heartbeat * 2 + 1, function () {
+				$this->close();
+			});
+
+			// Write to the server periodically to signal being alive
+			$this->heartbeatWriter = EventLoop::repeat($heartbeat / 2, function () {
+				$this->send(new Frame\Heartbeat());
+			});
+		}
 
 		$this->send(new Connection\TuneOk($maxChannel, $maxFrame, $heartbeat));
 
@@ -148,7 +184,10 @@ final class Protocol
 	private function onConnectionClose(Connection\Close $frame): void
 	{
 		$this->send(new Connection\CloseOk());
-		$this->emit('close');
+
+		$this->emit('close', $frame);
+
+		// FIXME: Throw in case of error?
 	}
 
 	/// Content header & body -------------------------------------------------
@@ -361,6 +400,11 @@ final class Protocol
 	{
 		$buffer = $frame->serialize()->flush();
 		$this->socket->write($buffer);
+
+		// Reset the heartbeat timer
+		if ($this->heartbeatWriter !== null) {
+			EventLoop::enable(EventLoop::disable($this->heartbeatWriter));
+		}
 	}
 
 	/**

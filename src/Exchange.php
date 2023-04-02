@@ -28,13 +28,6 @@ class Exchange
 	) {
 	}
 
-	public function __destruct()
-	{
-		// if (!$this->autoDelete) {
-		// 	$this->delete();
-		// }
-	}
-
 	public function delete(bool $ifUnused = true, bool $noWait = false): void
 	{
 		$this->protocol->get()?->exchangeDelete($this->channelId, $this->name, $ifUnused, $noWait);

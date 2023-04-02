@@ -23,14 +23,6 @@ class Channel
 	}
 
 	/**
-	 * Destructor.
-	 */
-	public function __destruct()
-	{
-		// $this->close();
-	}
-
-	/**
 	 * Request a channel close.
 	 *
 	 * @return void
